@@ -22,8 +22,7 @@ body{
 }
 
 table{
-margin-top: 120px;
-
+margin-top: 60px;
 }
 
 .navbar{
@@ -123,25 +122,28 @@ margin-top: 120px;
 <body>
 <center>
 <form method="post" action="${pageContext.request.contextPath}/docreate">
-<table>
+<div class="container">
+  <h1>STUDENT CREATION</h1>
+</div>
+<table class="table table-bordered table-striped">
 <tr>
 		<td>Name:</td>
-		<td><input type="text" name ="name"></td>
+		<td><input class="form-control" type="text" name ="name" required></td>
 </tr>
 <tr>
 	<td>Email:</td>
-	<td><input type="text" name ="email"></td>
+	<td><input class="form-control" type="text" name ="email" required></td>
 </tr>
 <tr>
 		<td>Age:</td>
-		<td><input type="number" name ="email"></td>
+		<td><input class="form-control" type="number" name ="email" min="3" required></td>
 </tr>
 <tr>
 		<td>text:</td>
-		<td><input type="text" name ="text"></td>
+		<td><input class="form-control" type="text" name ="text" required></td>
 </tr>
-</tr>
-		<td  ><input type="submit" value ="CreateStudent"></td>
+<tr>
+		<td  colspan="2" align="center"><input class="btn btn-info" type="submit" value ="CreateStudent"></td>
 </tr>
 
 </table>

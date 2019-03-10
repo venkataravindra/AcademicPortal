@@ -21,7 +21,7 @@ body{
 }
 
 table{
-margin-top: 120px;
+margin-top: 80px;
 
 }
 
@@ -122,9 +122,9 @@ margin-top: 120px;
 <f:view>
 
 <div class="container">
-
   
 <center>
+<h1>REGISTERED STUDENTS</h1>
 <table border="5" class="table table-bordered table-striped">
 <tr>
 	<th>ID</th>
