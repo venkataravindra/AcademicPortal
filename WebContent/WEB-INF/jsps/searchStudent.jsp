@@ -21,7 +21,7 @@ margin-top: 80px;
 <f:view>
 <div class="container">
 <center>
-<form action="${pageContext.request.contextPath}/searchStudent/${id}">
+<form action="searchThisStudent">
 <fieldset>
 <table class="table table-bordered table-striped">
 <tr>
@@ -33,15 +33,20 @@ margin-top: 80px;
 </fieldset>
 </table>
 <table class="table table-bordered table-striped">
-<c:forEach var="row${id}" items="${students}">
-     
-     <tr>
-     <td>${row.id}</td>
-     <td>${row.name}</td>
-     <td>${row.email}</td>
-     <td>${row.text}</td>
-    </tr>
-</c:forEach>
+<tr>
+	<th>ID</th>
+	<th>Name</th>
+	<th>E-mail</th>
+	<th>Age</th>
+	<th>Text</th>
+</tr>
+<tr>
+	 <td>${student.id}</td>
+	 <td>${student.name}</td>
+	 <td>${student.email}</td>
+	 <td>${student.age}</td>
+	 <td>${student.text}</td>
+</tr>
 </table>
 </form>
 </center>

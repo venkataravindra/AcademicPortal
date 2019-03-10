@@ -22,5 +22,9 @@ public class AcademicService {
 	{
 		return studentDao.getStudents();
 	}
+	public Student getStudent(int id)
+	{
+		return studentDao.getStudent(id);
+	}
     
 }
