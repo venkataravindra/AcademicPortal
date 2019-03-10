@@ -60,9 +60,24 @@ public class AcademicController {
 		    studentDao.createStudent(student);
 			return "studentcreated";
 	}
-	@RequestMapping(value="/registeredcourses",method=RequestMethod.POST)
+	@RequestMapping(value="/RegisteredCourses",method=RequestMethod.GET)
 	public String registeredCourses()
 	{
 	  return "RegisteredCourses";	
+	}
+	@RequestMapping(value="/marks",method=RequestMethod.GET)
+	public String marks()
+	{
+	  return "marks";	
+	}
+	@RequestMapping(value="/timetable",method=RequestMethod.GET)
+	public String timeTable()
+	{
+	  return "timetable";	
+	}
+	@RequestMapping(value="/attendence",method=RequestMethod.GET)
+	public String attendance()
+	{
+	  return "attendence";	
 	}
 }

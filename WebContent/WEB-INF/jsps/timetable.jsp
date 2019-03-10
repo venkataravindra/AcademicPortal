@@ -1,8 +1,5 @@
 <%@ page language="java" contentType="text/html; charset=ISO-8859-1" pageEncoding="ISO-8859-1"%>
-<%@ taglib uri="http://java.sun.com/jsp/jstl/sql" prefix="sql" %>
-<%@ taglib prefix="c" uri="http://java.sun.com/jsp/jstl/core" %>
 <%@ include file="Menu.jsp" %>  
-
 <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
 <html>
 <head>
@@ -11,7 +8,6 @@
   <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/css/bootstrap.min.css">
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
   <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/js/bootstrap.min.js"></script>
-
 <style type="text/css">
 body{
   font-family:"Arial", Serif;
@@ -116,34 +112,12 @@ margin-top: 120px;
 }
 
 </style>
-<title>Consolidated List</title>
+
+<title>Insert title here</title>
 </head>
 <body>
 <f:view>
-
-<div class="container">
-
-  
-<center>
-<table border="5" class="table table-bordered table-striped">
-<tr>
-	<th>ID</th>
-	<th>Name</th>
-	<th>E-mail</th>
-	<th>Text</th>
-</tr>
-<c:forEach var="row" items="${students}">
-     
-     <tr>
-     <td>${row.id}</td>
-     <td>${row.name}</td>
-     <td>${row.email}</td>
-     <td>${row.text}</td>
-    </tr>
-</c:forEach>
-</table>
-</center>
+Time table....
 </f:view>
-</div>
 </body>
 </html>
