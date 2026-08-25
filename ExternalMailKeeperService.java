@@ -5,6 +5,7 @@ import com.dbs.edoc.crypto.CryptoUtilException;
 import com.dbs.edoc.notification.error.ExchangeMessageException;
 import com.dbs.edoc.notification.services.notification.Mail;
 import com.dbs.edoc.notification.services.notification.ews.CloudMailExchangeService;
+import com.dbs.edoc.notification.services.notification.ews.CloudMailGraphService;
 import com.dbs.edoc.notification.services.notification.ews.InternalMailExchangeService;
 import com.google.gson.Gson;
 import org.apache.commons.lang.StringUtils;
@@ -23,18 +24,22 @@ public class ExternalMailKeeperService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ExternalMailKeeperService.class);
     private static final DynamicStringProperty MAIL_ACCESS_CREDENTIALS = new DynamicStringProperty("sender.mail.access.credentials", "");
+    private static final DynamicStringProperty GRAPH_ENABLED = new DynamicStringProperty("cloud.graph.enabled","Y");
     private final Map<String, List<String>> mailAccessCredentialsRef;
     private final Gson gson;
     private final CloudMailExchangeService cloudMailExchangeService;
     private final InternalMailExchangeService internalMailExchangeService;
+    private final CloudMailGraphService cloudMailGraphService;
 
     @Autowired
     public ExternalMailKeeperService(CloudMailExchangeService cloudMailExchangeService,
                                      InternalMailExchangeService internalMailExchangeService,
+                                     CloudMailGraphService cloudMailGraphService,
                                      Gson gson) {
         this.gson = gson;
         this.cloudMailExchangeService = cloudMailExchangeService;
         this.internalMailExchangeService = internalMailExchangeService;
+        this.cloudMailGraphService = cloudMailGraphService;
 
         LOGGER.info("Initializing External Mail Keeper service");
         this.mailAccessCredentialsRef = populateMailAccessCredentials();
@@ -51,8 +56,13 @@ public class ExternalMailKeeperService {
             LOGGER.info("Mail Credentials found for Sender Email [{}] for the email [{}]", senderEmail, mail.getSubject());
             LOGGER.info("Saving Email [{}] into Sent Items of Email Box [{}]", mail.getSubject(), senderEmail);
             if (domainPasswordPair.get(2).equals("CLOUD")) {
-                LOGGER.info("Sender Email [{}] is a cloud Email account. Handing over to Office365 Exchange Service", senderEmail);
-                cloudMailExchangeService.saveMailToOutbox(senderEmail, domainPasswordPair, mail, attachment, fileName);
+                if(GRAPH_ENABLED.getValue().equals("Y")){
+                    LOGGER.info("Sender Email [{}] is a cloud Email account. Handing over to Graph Service", senderEmail);
+                    cloudMailGraphService.saveMailToOutbox(senderEmail, domainPasswordPair, mail, attachment, fileName);
+                } else {
+                    LOGGER.info("Sender Email [{}] is a cloud Email account. Handing over to Office365 Exchange Service", senderEmail);
+                    cloudMailExchangeService.saveMailToOutbox(senderEmail, domainPasswordPair, mail, attachment, fileName);
+                }
             } else {
                 LOGGER.info("Sender Email [{}] is an on premise Email account. Handing over to simple Exchange Service", senderEmail);
                 internalMailExchangeService.saveMailToOutbox(senderEmail, domainPasswordPair, mail, attachment, fileName);
