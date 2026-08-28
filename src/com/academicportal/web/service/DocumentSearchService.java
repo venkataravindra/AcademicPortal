@@ -239,8 +239,13 @@ public class DocumentSearchService {
     private Pageable buildConfirmationsPageable(DocumentSearchRequest request) {
         int pageSize = Math.max(request.getPageSize(), 1);
         int pageNumber = request.getOffset() / pageSize;
-        Sort sort = StringUtils.isNotEmpty(request.getSortField())
-                ? Sort.by(request.isSortAscending() ? Sort.Direction.ASC : Sort.Direction.DESC, request.getSortField())
+        // sortField historically named an Elasticsearch document attribute; map the
+        // known ES-only field to its TransactionConfirmations JPA equivalent.
+        String sortField = FIELD_CREATE_TIMESTAMP.equals(request.getSortField())
+                ? FIELD_UPLOAD_DATETIME_SGT
+                : request.getSortField();
+        Sort sort = StringUtils.isNotEmpty(sortField)
+                ? Sort.by(request.isSortAscending() ? Sort.Direction.ASC : Sort.Direction.DESC, sortField)
                 : Sort.unsorted();
         return PageRequest.of(pageNumber, pageSize, sort);
     }
