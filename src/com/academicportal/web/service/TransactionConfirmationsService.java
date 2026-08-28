@@ -1,7 +1,7 @@
 package com.dbs.edoc.docsearch.ui.service;
 
-import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -30,11 +30,9 @@ public class TransactionConfirmationsService {
 		return repo.findByProductAndStatus(product, category, status, pageable);
 	}
 
-	public Page<TransactionConfirmations> searchConfirmations(String category, String product, String status,
-			String entity, String company, String txnRef, LocalDate txnEventDateFrom, LocalDate txnEventDateTo,
-			LocalDate maturityPaymentDateFrom, LocalDate maturityPaymentDateTo, Pageable pageable) {
-		return repo.searchConfirmations(category, product, status, entity, company, txnRef,
-				txnEventDateFrom, txnEventDateTo, maturityPaymentDateFrom, maturityPaymentDateTo, pageable);
+	public Page<TransactionConfirmations> searchConfirmations(String category, Set<String> documentTypes, Set<String> statuses,
+			Set<String> entityCodes, Set<String> companyIds, Pageable pageable) {
+		return repo.searchConfirmations(category, documentTypes, statuses, entityCodes, companyIds, pageable);
 	}
 
 	public TransactionConfirmations getConfirmationById(Long id) {
