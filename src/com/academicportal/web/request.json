@@ -1,0 +1,24 @@
+{
+    "offset": 0,
+    "pageSize": 20,
+    "sortField": "createTimestamp",
+    "sortAscending": false,
+    "entityCodes": [],
+    "companyIds": [],
+    "documentTypes": [
+        {
+            "categoryName": "TRANSACTIONS",
+            "className": "CONFIRMATION",
+            "productTypeNames": []
+        },
+        {
+            "categoryName": "TRANSACTIONS",
+            "className": "EVENT",
+            "productTypeNames": []
+        }
+    ],
+    "statuses": [],
+    "access": "EMAIL",
+    "dateAttributes": [],
+    "stringAttributes": []
+}
