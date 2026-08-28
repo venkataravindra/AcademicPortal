@@ -1,9 +1,9 @@
 package com.dbs.edoc.docsearch.ui.repo;
 
 import java.sql.Connection;
-import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -31,26 +31,16 @@ public interface TransactionConfirmationsRepo extends JpaRepository<TransactionC
 			@Param("status") String status, Pageable pageable);
 
 	@Query("SELECT t FROM TransactionConfirmations t WHERE t.category = :category " +
-			"AND (:product IS NULL OR t.documentType = :product) " +
-			"AND (:status IS NULL OR t.status = :status) " +
-			"AND (:entity IS NULL OR t.entity = :entity) " +
-			"AND (:company IS NULL OR LOWER(t.company) LIKE LOWER(CONCAT('%', :company, '%'))) " +
-			"AND (:txnRef IS NULL OR LOWER(t.txnRef) LIKE LOWER(CONCAT('%', :txnRef, '%'))) " +
-			"AND (:txnEventDateFrom IS NULL OR t.txnEventDate >= :txnEventDateFrom) " +
-			"AND (:txnEventDateTo IS NULL OR t.txnEventDate <= :txnEventDateTo) " +
-			"AND (:maturityPaymentDateFrom IS NULL OR t.maturityPaymentDate >= :maturityPaymentDateFrom) " +
-			"AND (:maturityPaymentDateTo IS NULL OR t.maturityPaymentDate <= :maturityPaymentDateTo)")
+			"AND (:documentTypes IS NULL OR t.documentType IN :documentTypes) " +
+			"AND (:statuses IS NULL OR t.status IN :statuses) " +
+			"AND (:entityCodes IS NULL OR t.entity IN :entityCodes) " +
+			"AND (:companyIds IS NULL OR t.company IN :companyIds)")
 	Page<TransactionConfirmations> searchConfirmations(
 			@Param("category") String category,
-			@Param("product") String product,
-			@Param("status") String status,
-			@Param("entity") String entity,
-			@Param("company") String company,
-			@Param("txnRef") String txnRef,
-			@Param("txnEventDateFrom") LocalDate txnEventDateFrom,
-			@Param("txnEventDateTo") LocalDate txnEventDateTo,
-			@Param("maturityPaymentDateFrom") LocalDate maturityPaymentDateFrom,
-			@Param("maturityPaymentDateTo") LocalDate maturityPaymentDateTo,
+			@Param("documentTypes") Set<String> documentTypes,
+			@Param("statuses") Set<String> statuses,
+			@Param("entityCodes") Set<String> entityCodes,
+			@Param("companyIds") Set<String> companyIds,
 			Pageable pageable);
 
 	@Transactional
