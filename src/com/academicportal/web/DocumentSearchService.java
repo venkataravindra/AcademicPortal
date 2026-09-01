@@ -38,11 +38,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.repository.query.Param;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
@@ -61,6 +64,7 @@ public class DocumentSearchService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DocumentSearchService.class);
     private static final String FIELD_CREATE_TIMESTAMP = "createTimestamp";
+    private static final String FIELD_UPLOAD_DATETIME_SGT = "uploadDatetimeSgt";
     private static final String ENTITY_CODE = "entityCode";
     private static final String STATUS = "status";
     private static final String MX_BOOKING_ENTITY = "mxBookingEntity";
@@ -73,14 +77,14 @@ public class DocumentSearchService {
     private SearchConfigService configService;
     private UserService userService;
     private ExcelBuilder excelBuilder;
-    private Gson gson;
-
     private TransactionConfirmationsService transactionConfirmationsService;
+    private Gson gson;
 
     @Autowired
     public DocumentSearchService(SearchConfigService configService,
                                  UserService userService,
-                                 ExcelBuilder excelBuilder,TransactionConfirmationsService transactionConfirmationsService) {
+                                 ExcelBuilder excelBuilder,
+                                 TransactionConfirmationsService transactionConfirmationsService) {
         this.configService = configService;
         this.userService = userService;
         this.excelBuilder = excelBuilder;
@@ -93,83 +97,38 @@ public class DocumentSearchService {
     }
 
     public DocumentLastUploadResponse getLastUploadTime(DocumentSearchRequest request) {
-        String lastUploadStr = buildElasticsearchRequest(request).map(searchRequest -> {
-            searchRequest.source().from(0).size(1)
-                    .sort(fieldSort(FIELD_CREATE_TIMESTAMP).order(SortOrder.DESC))
-                    .fetchSource(FIELD_CREATE_TIMESTAMP, null);
+        request.setOffset(0);
+        request.setPageSize(1);
+        request.setSortField(FIELD_UPLOAD_DATETIME_SGT);
+        request.setSortAscending(false);
 
-            if (DocumentSearchConstants.DistributionType.EMAIL.equalsIgnoreCase(request.getAccess())) {
-                Set<String> docClasses = new HashSet<>();
-                for (DocumentType documentType : request.getDocumentTypes()) {
-                    docClasses.add(upperCase(documentType.getClassName()));
-                }
-                Set<String> indices = configService.getIndexForDocType(docClasses);
-                searchRequest.indices(indices.toArray(new String[indices.size()]));
-            }
-
-            SearchResponse searchResponse = configService.search(searchRequest);
-            SearchHits hits = searchResponse.getHits();
-            if (hits.getHits().length == 1) {
-                return Objects.toString(hits.getAt(0).getSourceAsMap().get(FIELD_CREATE_TIMESTAMP), null);
-            }
-
-            return null;
-        }).orElse(null);
+        String lastUploadStr = buildSearchRequest(request).map(page ->
+                page.hasContent() ? Objects.toString(page.getContent().get(0).getUploadDatetimeSgt(), null) : null
+        ).orElse(null);
 
         DocumentLastUploadResponse response = new DocumentLastUploadResponse();
         response.setData(lastUploadStr);
         return response;
     }
 
-
     public EdocSearchResponse<Map<String, Object>> search(DocumentSearchRequest request) {
         // allow max of 100 records for normal search request
-        Page<TransactionConfirmations> confirmations = buildSearchRequest(request);
-        return convertToEdocSearchResponse(confirmations);
+        request.setPageSize(Math.min(100, request.getPageSize()));
+        return buildSearchRequest(request).map(this::buildSearchResponse).orElse(EdocSearchResponse.empty());
     }
 
     public ResponseEntity<byte[]> export(DocumentSearchRequest request) {
-        Page<TransactionConfirmations> confirmations = buildSearchRequest(request);
-        if (confirmations != null && !confirmations.isEmpty()) {
-            EdocSearchResponse<Map<String, Object>> searchResponse = convertToEdocSearchResponse(confirmations);
+        request.setOffset(0);
+        request.setPageSize(65000);
+        return buildSearchRequest(request).map(page -> {
+            EdocSearchResponse<Map<String, Object>> searchResponse = buildSearchResponse(page);
             String filename = String.format("SearchResult_%s.%s", now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")), "xls");
             HttpHeaders responseHeaders = new HttpHeaders();
             responseHeaders.set(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_OCTET_STREAM_VALUE);
             responseHeaders.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + filename);
             return ok().headers(responseHeaders).body(excelBuilder.build(request, searchResponse));
-        }
-        return null;
+        }).orElse(null);
     }
-    private EdocSearchResponse<Map<String, Object>> convertToEdocSearchResponse(Page<TransactionConfirmations> confirmations) {
-        EdocSearchResponse<Map<String, Object>> response = new EdocSearchResponse<>();
-        if (confirmations != null) {
-            response.setTotal(confirmations.getTotalElements());
-            List<Map<String, Object>> results = confirmations.getContent().stream()
-                    .map(this::convertTransactionConfirmationToMap)
-                    .collect(Collectors.toList());
-            response.setResults(results);
-        } else {
-            response.setTotal(0);
-            response.setResults(Collections.emptyList());
-        }
-        return response;
-    }
-
-    private Map<String, Object> convertTransactionConfirmationToMap(TransactionConfirmations confirmation) {
-        Map<String, Object> map = new HashMap<>();
-        map.put("id", confirmation.getId());
-        map.put("category", confirmation.getCategory());
-        map.put("product", confirmation.getProduct());
-        map.put("status", confirmation.getStatus());
-        map.put("entity", confirmation.getEntity());
-        map.put("company", confirmation.getCompany());
-        map.put("txnRef", confirmation.getTxnRef());
-        map.put("txnEventDate", confirmation.getTxnEventDate());
-        map.put("maturityPaymentDate", confirmation.getMaturityPaymentDate());
-        // Add other fields as needed
-        return map;
-    }
-
 
 
     public EdocSearchResponse<ExternalDocumentSearchRecord> externalSystemDocumentSearch(ExternalDocumentSearchRequest request) {
@@ -234,90 +193,11 @@ public class DocumentSearchService {
     }
 
 
-    private Page<TransactionConfirmations> buildSearchRequest(DocumentSearchRequest request) {
+    private Optional<Page<TransactionConfirmations>> buildSearchRequest(DocumentSearchRequest request) {
         Set<DocumentType> documentTypes = request.getDocumentTypes();
-        if (request.getDocumentTypes().isEmpty()) {
-            throw new IllegalArgumentException("Requires at least 1 document type");
-        }
-
-        Set<String> entityCodes = request.getEntityCodes();
-        Set<String> companyIds = request.getCompanyIds();
-        Set<String> documentClasses = new HashSet<>();
-        Set<String> productTypes = new HashSet<>();
-        Set<String> accessibleEntities = new HashSet<>();
-
-        // check permission
-        User user = userService.currentUser();
-        LOGGER.info("Performing search under user id: {}", user.getUserId());
-        if (user instanceof LdapUser) {
-            LdapUser ldapUser = (LdapUser) user;
-
-            Map<String, Set<String>> entityDocumentMap = populateAccessLevels(ldapUser);
-            LOGGER.info("Document and entities user has access to : {}", entityDocumentMap);
-            addEntityDocumentProducts(entityDocumentMap, documentTypes,entityCodes,documentClasses,productTypes, accessibleEntities, user);
-            LOGGER.info("Searching data under doc classes and entity codes [{}] for User {} and accessible entities {} ",
-                    entityDocumentMap, ldapUser.getUserId(), accessibleEntities);
-        } else {
-            if (filterForExternal(documentTypes, entityCodes, companyIds, documentClasses, productTypes, (MarsUser) user))
-                return Page.empty();
-        }
-
-
-        if (DocumentSearchConstants.DistributionType.EMAIL.equalsIgnoreCase(request.getAccess())) {
-            Set<String> nonEdcoDocumentClasses = configService.getNonEdocDocClassesForDocType(documentClasses);
-
-            // Call TransactionConfirmationService -> searchConfirmations()
-            Pageable pageable = PageRequest.of(request.getOffset() / request.getPageSize(), request.getPageSize());
-            // ✅ ADD DEBUGGING
-            System.out.println("=== BUILD SEARCH REQUEST DEBUG ===");
-            System.out.println("Request Document Types: " + documentTypes);
-            System.out.println("Request Entity Codes: " + entityCodes);
-            System.out.println("Request Company IDs: " + companyIds);
-            System.out.println("Request Statuses: " + request.getStatuses());
-            System.out.println("Request Access: " + request.getAccess());
-
-            Page<TransactionConfirmations> confirmations = transactionConfirmationsService.searchConfirmations(
-                    request.getAccess(), // category
-                    request.getDocumentTypes(),
-                    request.getStatuses(),
-                    accessibleEntities,
-                    companyIds,
-                    pageable
-            );
-            return confirmations;
-        }
-
-        if(user instanceof MarsUser) {
-            LOGGER.info("External user - entities user has access to : {}", entityCodes);
-            accessibleEntities = entityCodes;
-        }
-
-
-        System.out.println("REGULAR ACCESS - Calling searchConfirmations with:");
-        System.out.println("Category: " + request.getDocumentTypes().iterator().next().getCategoryName());
-        System.out.println("Document Types: " + request.getDocumentTypes());
-        System.out.println("Statuses: " + request.getStatuses());
-        System.out.println("Accessible Entities: " + accessibleEntities);
-        System.out.println("Company IDs: " + companyIds);
-
-// Call TransactionConfirmationService -> searchConfirmations()
-Pageable pageable = PageRequest.of(request.getOffset() / request.getPageSize(), request.getPageSize());
-    Page<TransactionConfirmations> confirmations = transactionConfirmationsService.searchConfirmations(
-            request.getAccess(), // category
-            request.getDocumentTypes(),
-            request.getStatuses(),
-            accessibleEntities,
-            companyIds,
-            pageable
-    );
-        return confirmations;
-
-//        SearchSourceBuilder builder = buildEdocQuery(documentClasses, accessibleEntities, companyIds, productTypes, request, user);
-//        return Optional.of(configService.createSearchRequest(builder));
-    }
-
-    private Optional<SearchRequest> buildElasticsearchRequest(DocumentSearchRequest request) {
-        Set<DocumentType> documentTypes = request.getDocumentTypes();
+        Set<String> productTypeNames = documentTypes.stream()
+                .flatMap(documentType -> documentType.getProductTypeNames().stream())
+                .collect(Collectors.toSet());
         if (request.getDocumentTypes().isEmpty()) {
             throw new IllegalArgumentException("Requires at least 1 document type");
         }
@@ -344,20 +224,118 @@ Pageable pageable = PageRequest.of(request.getOffset() / request.getPageSize(), 
                 return Optional.empty();
         }
 
-        if (DocumentSearchConstants.DistributionType.EMAIL.equalsIgnoreCase(request.getAccess())) {
-            Set<String> nonEdcoDocumentClasses = configService.getNonEdocDocClassesForDocType(documentClasses);
-            SearchSourceBuilder builder = buildNonEdocQuery(nonEdcoDocumentClasses, accessibleEntities, companyIds, productTypes, request);
-            Set<String> indices = configService.getIndexForDocType(documentClasses);
-            return Optional.of(configService.createSearchRequest(builder).indices(indices.toArray(new String[indices.size()])));
-        }
+        Pageable pageable = buildConfirmationsPageable(request);
+        LOGGER.info("Search parameters - documentTypes: {}, entityCodes: {}, companyIds: {}, statuses: {}",
+                documentTypes, entityCodes, companyIds, request.getStatuses());
+        LOGGER.info("Accessible entities: {}, Document classes: {}, productTypeNames: {}", accessibleEntities, documentClasses,productTypeNames);
 
+        if (DocumentSearchConstants.DistributionType.EMAIL.equalsIgnoreCase(request.getAccess())) {
+            Set<String> documentTypeNames = documentTypes.stream().map(DocumentType::getClassName).collect(Collectors.toSet());
+            LOGGER.info("=== EMAIL SEARCH DEBUG ===");
+            LOGGER.info("Category (request.getAccess()): '{}'", request.getAccess());
+            LOGGER.info("ProductTypeNames: {}", productTypeNames);
+            LOGGER.info("DocumentTypeNames: {}", documentTypeNames);
+            LOGGER.info("Statuses: {}", request.getStatuses());
+            LOGGER.info("AccessibleEntities: {}", accessibleEntities);
+            LOGGER.info("CompanyIds: {}", companyIds);
+
+            return Optional.of(transactionConfirmationsService.searchConfirmations(
+                    request.getAccess(),productTypeNames,
+                    documentTypeNames, request.getStatuses(), accessibleEntities, companyIds,null,null,null,null,null, pageable));
+
+
+        }
         if(user instanceof MarsUser) {
             LOGGER.info("External user - entities user has access to : {}", entityCodes);
             accessibleEntities = entityCodes;
         }
+        Set<String> documentTypeNames = documentTypes.stream().map(DocumentType::getClassName).collect(Collectors.toSet());
+        LOGGER.info("=== EDOC SEARCH DEBUG ===");
+        LOGGER.info("Category (request.getAccess()): '{}'", request.getAccess());
+        LOGGER.info("ProductTypeNames: {}", productTypeNames);
+        LOGGER.info("DocumentTypeNames: {}", documentTypeNames);
+        LOGGER.info("Statuses: {}", request.getStatuses());
+        LOGGER.info("AccessibleEntities: {}", accessibleEntities);
+        LOGGER.info("CompanyIds: {}", companyIds);
+        LOGGER.info("##Accessible entities##: {}, Document classes: {}, productTypeNames: {}", accessibleEntities, documentClasses,productTypeNames);
+        return Optional.of(transactionConfirmationsService.searchConfirmations(
+                request.getAccess(),productTypeNames,
+                documentTypeNames, request.getStatuses(), accessibleEntities, companyIds,null,null,null,null,null, pageable));
+    }
 
-        SearchSourceBuilder builder = buildEdocQuery(documentClasses, accessibleEntities, companyIds, productTypes, request, user);
-        return Optional.of(configService.createSearchRequest(builder));
+    private Pageable buildConfirmationsPageable(DocumentSearchRequest request) {
+        int pageSize = Math.max(request.getPageSize(), 1);
+        int pageNumber = request.getOffset() / pageSize;
+        // sortField historically named an Elasticsearch document attribute; map the
+        // known ES-only field to its TransactionConfirmations JPA equivalent.
+        String sortField = FIELD_CREATE_TIMESTAMP.equals(request.getSortField())
+                ? FIELD_UPLOAD_DATETIME_SGT
+                : request.getSortField();
+        Sort sort = StringUtils.isNotEmpty(sortField)
+                ? Sort.by(request.isSortAscending() ? Sort.Direction.ASC : Sort.Direction.DESC, sortField)
+                : Sort.unsorted();
+        return PageRequest.of(pageNumber, pageSize, sort);
+    }
+
+    private EdocSearchResponse<Map<String, Object>> buildSearchResponse(Page<TransactionConfirmations> page) {
+        EdocSearchResponse<Map<String, Object>> response = new EdocSearchResponse<>();
+        response.setTotal(page.getTotalElements());
+        response.setResults(page.getContent().stream().map(this::confirmationToMap).collect(Collectors.toList()));
+        return response;
+    }
+
+    private Map<String, Object> confirmationToMap(TransactionConfirmations confirmation) {
+        Map<String, Object> map = new HashMap<>();
+
+        // Existing SIT fields
+        map.put("id", confirmation.getId());
+        map.put("docId", confirmation.getDoc_id());
+        map.put("category", confirmation.getCategory());
+        map.put("txnRef", confirmation.getTxnRef());
+        map.put("txnEventDate", confirmation.getTxnEventDate());
+        map.put("maturityPaymentDate", confirmation.getMaturityPaymentDate());
+        map.put("company", confirmation.getCompany());
+        map.put("entity", confirmation.getEntity());
+        map.put("product", confirmation.getProduct());
+        map.put("documentType", confirmation.getDocumentType());
+        map.put("ccy", confirmation.getCcy());
+        map.put("status", confirmation.getStatus());
+        map.put("lastApprovedRejected", confirmation.getLastApprovedRejected());
+        map.put("uploadDatetimeSgt", confirmation.getUploadDatetimeSgt());
+        map.put("emailDatetimeSgt", confirmation.getEmailDatetimeSgt());
+        map.put("action", confirmation.getAction());
+        map.put("uniqueKey", confirmation.getUniqueKey());
+        map.put("contentMd5", confirmation.getContentMd5());
+        map.put("mimeType", confirmation.getMimeType());
+        map.put("type", confirmation.getType());
+        map.put("isRevised", confirmation.getIsRevised());
+        map.put("cinCif", confirmation.getCinCif());
+        map.put("companyId", confirmation.getCompanyId());
+        map.put("name", confirmation.getName());
+        map.put("dupCheckMd5", confirmation.getDupCheckMd5());
+        map.put("userType", confirmation.getUserType());
+        map.put("murexLabel", confirmation.getMurexLabel());
+        map.put("levelsOfApproval", confirmation.getLevelsOfApproval());
+        map.put("tradeDate", confirmation.getTradeDate());
+        map.put("updateTimestamp", confirmation.getUpdateTimestamp());
+        try {
+            map.put("tradeReference", confirmation.getTxnRef());
+            map.put("companyName", confirmation.getCompany());
+            map.put("maturityOrPaymentDate", confirmation.getMaturityPaymentDate());
+            map.put("createTimestamp", confirmation.getUploadDatetimeSgt());
+            map.put("maturityDate", confirmation.getMaturityPaymentDate());
+            map.put("productTypeName", confirmation.getProduct());
+            map.put("entityCode", confirmation.getEntity());
+            map.put("tradeOrEventDate", confirmation.getTxnEventDate() != null ? confirmation.getTxnEventDate() : confirmation.getTradeDate());
+            map.put("cinOrCif", confirmation.getCinCif());
+            map.put("createOrUpdateTimestamp", confirmation.getUpdateTimestamp());
+            map.put("productCode", confirmation.getProduct());
+            map.put("ackStatus", confirmation.getStatus());
+        } catch(Exception e){
+            e.getMessage();
+        }
+
+        return map;
     }
 
     private void addEntityDocumentProducts(Map<String, Set<String>> entityDocumentMap, Set<DocumentType> documentTypes,
