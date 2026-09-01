@@ -4,9 +4,10 @@ import java.time.LocalDate;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
-import com.dbs.edoc.docsearch.api.request.DocumentType;
+import com.dbs.edoc.docsearch.service.search.DocumentSearchService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -19,56 +20,54 @@ import com.dbs.edoc.docsearch.ui.repo.TransactionConfirmationsRepo;
 @Service
 public class TransactionConfirmationsService {
 
+	private static final Logger LOGGER = LoggerFactory.getLogger(DocumentSearchService.class);
 	@Autowired private TransactionConfirmationsRepo repo;
 
 	public Page<TransactionConfirmations> getConfirmations(String category, List<String> entities, Pageable pageable) {
 		return repo.findByCategoryAndEntities(category, entities, pageable);
 	}
-	
+
 	public Page<TransactionConfirmations> getConfirmations(String category, Pageable pageable) {
 		return repo.findByCategory(category, pageable);
 	}
-	
+
 	public Page<TransactionConfirmations> findConfirmations(String product,String category,String status, Pageable pageable) {
 		System.out.println(String.format("product %s , category %s, status %s", product,category,status));
 		return repo.findByProductAndStatus(product, category, status, pageable);
 	}
 
-//	public Page<TransactionConfirmations> searchConfirmations(String category, Set<DocumentType> documentTypes, Set<String> statuses,
-//															  Set<String> entityCodes, Set<String> companyIds, String txnRef, LocalDate txnEventDateFrom, LocalDate txnEventDateTo,
-//															  LocalDate maturityPaymentDateFrom, LocalDate maturityPaymentDateTo, Pageable pageable) {
-//		return repo.searchConfirmations(category, documentTypes, statuses, entityCodes, companyIds, txnRef,
-//				txnEventDateFrom, txnEventDateTo, maturityPaymentDateFrom, maturityPaymentDateTo, pageable);
-//	}
+	public Page<TransactionConfirmations> searchConfirmations(String category,Set<String> product, Set<String> documentTypes,
+															  Set<String> statuses, Set<String> entityCodes,
+															  Set<String> companyIds, String txnRef,
+															  LocalDate txnEventDateFrom, LocalDate txnEventDateTo,
+															  LocalDate maturityPaymentDateFrom, LocalDate maturityPaymentDateTo,
+															  Pageable pageable) {
+		// Convert empty sets to null for proper query handling
+		Set<String> productSet = (product != null && !product.isEmpty()) ? product : null;
+		Set<String> docTypes = (documentTypes != null && !documentTypes.isEmpty()) ? documentTypes : null;
+		Set<String> statusSet = (statuses != null && !statuses.isEmpty()) ? statuses : null;
+		Set<String> entitySet = (entityCodes != null && !entityCodes.isEmpty()) ? entityCodes : null;
+		Set<String> companySet = (companyIds != null && !companyIds.isEmpty()) ? companyIds : null;
 
+		LOGGER.info("=== FINAL SEARCH PARAMETERS ===");
+		LOGGER.info("Category: '{}'", category);
+		LOGGER.info("ProductSet: {}", productSet);
+		LOGGER.info("DocTypes: {}", docTypes);
+		LOGGER.info("StatusSet: {}", statusSet);
+		LOGGER.info("EntitySet: {}", entitySet);
+		LOGGER.info("CompanySet: {}", companySet);
+		LOGGER.info("TxnRef: '{}'", txnRef);
 
+		Page<TransactionConfirmations> result = repo.searchConfirmations(category,
+				productSet, docTypes, statusSet, entitySet, companySet,
+				txnRef, txnEventDateFrom, txnEventDateTo, maturityPaymentDateFrom, maturityPaymentDateTo,
+				pageable);
 
-
-	public Page<TransactionConfirmations> searchConfirmations(String category, Set<DocumentType> documentTypes, Set<String> statuses,
-															  Set<String> entityCodes, Set<String> companyIds, Pageable pageable) {
-
-		// Convert DocumentType objects to string class names
-		Set<String> documentTypeNames = Collections.emptySet();
-		if (documentTypes != null && !documentTypes.isEmpty()) {
-			documentTypeNames = documentTypes.stream()
-					.map(DocumentType::getClassName)
-					.filter(className -> className != null && !className.trim().isEmpty())
-					.collect(Collectors.toSet());
-		}
-
-		// Handle null/empty collections by converting to empty sets
-		Set<String> safeStatuses = (statuses != null) ? statuses : Collections.emptySet();
-		Set<String> safeEntityCodes = (entityCodes != null) ? entityCodes : Collections.emptySet();
-		Set<String> safeCompanyIds = (companyIds != null) ? companyIds : Collections.emptySet();
-		System.out.println("=== SEARCH CONFIRMATIONS DEBUG ===");
-		System.out.println("Category: " + category);
-		System.out.println("Document Types: " + documentTypeNames);
-		System.out.println("Statuses: " + safeStatuses);
-		System.out.println("Entity Codes: " + safeEntityCodes);
-		System.out.println("Company IDs: " + safeCompanyIds);
-		System.out.println("Pageable: " + pageable);
-		return repo.searchConfirmations(category, documentTypeNames, safeStatuses, safeEntityCodes, safeCompanyIds, pageable);
+		LOGGER.info("Repository result - total elements: {}, number of elements: {}",
+				result.getTotalElements(), result.getNumberOfElements());
+		return result;
 	}
+
 
 	public TransactionConfirmations getConfirmationById(Long id) {
 		return repo.findById(id).orElse(null);
