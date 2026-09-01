@@ -1,109 +1,115 @@
-package com.dbs.edoc.docsearch.ui.repo;
+package com.dbs.edoc.docsearch.ui.service;
 
-import java.sql.Connection;
-import java.util.Arrays;
+import java.time.LocalDate;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
-import com.dbs.edoc.docsearch.api.request.DocumentType;
+import com.dbs.edoc.docsearch.service.search.DocumentSearchService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.dbs.edoc.docsearch.ui.model.TransactionConfirmations;
+import com.dbs.edoc.docsearch.ui.repo.TransactionConfirmationsRepo;
 
-import jakarta.transaction.Transactional;
+@Service
+public class TransactionConfirmationsService {
 
-public interface TransactionConfirmationsRepo extends JpaRepository<TransactionConfirmations, Long> {
+	private static final Logger LOGGER = LoggerFactory.getLogger(DocumentSearchService.class);
+	@Autowired private TransactionConfirmationsRepo repo;
 
-	@Query("SELECT t FROM TransactionConfirmations t WHERE t.category = :category AND t.entity IN :entities")
-	Page<TransactionConfirmations> findByCategoryAndEntities(@Param("category") String category, @Param("entities") List<String> entities, Pageable pageable);
-	
-	@Query("SELECT t FROM TransactionConfirmations t WHERE t.category = :category")
-	Page<TransactionConfirmations> findByCategory(@Param("category") String category, Pageable pageable);
+	public Page<TransactionConfirmations> getConfirmations(String category, List<String> entities, Pageable pageable) {
+		return repo.findByCategoryAndEntities(category, entities, pageable);
+	}
 
-	@Query("SELECT t FROM TransactionConfirmations t WHERE t.category = :category AND" +
-			"(:product IS NULL OR t.documentType = :product) " +
-			"AND (:status IS NULL OR t.status = :status)")
-	Page<TransactionConfirmations> findByProductAndStatus(@Param("product") String product,@Param("category") String category,
-			@Param("status") String status, Pageable pageable);
+	public Page<TransactionConfirmations> getConfirmations(String category, Pageable pageable) {
+		return repo.findByCategory(category, pageable);
+	}
 
-	@Query("SELECT t FROM TransactionConfirmations t WHERE t.category = :category " +
-			"AND (:documentTypes IS NULL OR t.documentType IN (:documentTypes)) " +
-			"AND (:statuses IS NULL OR t.status IN (:statuses)) " +
-			"AND (:entityCodes IS NULL OR t.entity IN (:entityCodes)) " +
-			"AND (:companyIds IS NULL OR t.company IN (:companyIds))")
-	Page<TransactionConfirmations> searchConfirmations(
-			@Param("category") String category,
-			@Param("documentTypes") Set<String> documentTypes,
-			@Param("statuses") Set<String> statuses,
-			@Param("entityCodes") Set<String> entityCodes,
-			@Param("companyIds") Set<String> companyIds,
-			Pageable pageable);
+	public Page<TransactionConfirmations> findConfirmations(String product,String category,String status, Pageable pageable) {
+		System.out.println(String.format("product %s , category %s, status %s", product,category,status));
+		return repo.findByProductAndStatus(product, category, status, pageable);
+	}
+
+	public Page<TransactionConfirmations> searchConfirmations(String category,Set<String> product, Set<String> documentTypes,
+															  Set<String> statuses, Set<String> entityCodes,
+															  Set<String> companyIds, String txnRef,
+															  LocalDate txnEventDateFrom, LocalDate txnEventDateTo,
+															  LocalDate maturityPaymentDateFrom, LocalDate maturityPaymentDateTo,
+															  Pageable pageable) {
+		// Convert empty sets to null for proper query handling
+		Set<String> productSet = (product != null && !product.isEmpty()) ? product : null;
+		Set<String> docTypes = (documentTypes != null && !documentTypes.isEmpty()) ? documentTypes : null;
+		Set<String> statusSet = (statuses != null && !statuses.isEmpty()) ? statuses : null;
+		Set<String> entitySet = (entityCodes != null && !entityCodes.isEmpty()) ? entityCodes : null;
+		Set<String> companySet = (companyIds != null && !companyIds.isEmpty()) ? companyIds : null;
+
+		LOGGER.info("=== FINAL SEARCH PARAMETERS ===");
+		LOGGER.info("Category: '{}'", category);
+		LOGGER.info("ProductSet: {}", productSet);
+		LOGGER.info("DocTypes: {}", docTypes);
+		LOGGER.info("StatusSet: {}", statusSet);
+		LOGGER.info("EntitySet: {}", entitySet);
+		LOGGER.info("CompanySet: {}", companySet);
+		LOGGER.info("TxnRef: '{}'", txnRef);
+
+		Page<TransactionConfirmations> result = repo.searchConfirmations(category,
+				productSet, docTypes, statusSet, entitySet, companySet,
+				txnRef, txnEventDateFrom, txnEventDateTo, maturityPaymentDateFrom, maturityPaymentDateTo,
+				pageable);
+
+		LOGGER.info("Repository result - total elements: {}, number of elements: {}",
+				result.getTotalElements(), result.getNumberOfElements());
+		return result;
+	}
+
+
+	public TransactionConfirmations getConfirmationById(Long id) {
+		return repo.findById(id).orElse(null);
+	}
+
+	public TransactionConfirmations saveConfirmation(TransactionConfirmations confirmation) {
+		return repo.save(confirmation);
+	}
+
+	public List<TransactionConfirmations> saveAllConfirmations(List<TransactionConfirmations> confirmations) {
+		return repo.saveAll(confirmations);
+	}
 
 	@Transactional
-	default void batchInsertConfirmations(List<TransactionConfirmations> confirmations, int batchsize, JdbcTemplate jdbcTemplate) {
-		if (confirmations.isEmpty()) return;
-
-		String sql = """
-			INSERT INTO transaction_confirmations (
-				document_id, category, txn_ref, txn_event_date, maturity_payment_date, company, entity, product,
-				document_type, ccy, status, last_approved_rejected, upload_datetime_sgt, email_datetime_sgt, action,
-				unique_key, content_md5, mime_type, type, is_revised, cin_cif, company_id, name, dup_check_md5,
-				user_type, murex_label, levels_of_approval, trade_date, update_timestamp
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			""";
-
-		try (Connection conn = jdbcTemplate.getDataSource().getConnection()) {
-			System.out.println("Inserting TransactionConfirmations to: " + conn.getMetaData().getURL());
-		} catch (Exception e) {
-			e.printStackTrace();
+	public TransactionConfirmations updateConfirmation(Long id, TransactionConfirmations confirmationData) {
+		TransactionConfirmations existing = repo.findById(id).orElse(null);
+		if (existing == null) {
+			return null;
 		}
+		if (confirmationData.getCategory() != null) existing.setCategory(confirmationData.getCategory());
+		if (confirmationData.getProduct() != null) existing.setProduct(confirmationData.getProduct());
+		if (confirmationData.getStatus() != null) existing.setStatus(confirmationData.getStatus());
+		if (confirmationData.getEntity() != null) existing.setEntity(confirmationData.getEntity());
+		if (confirmationData.getCompany() != null) existing.setCompany(confirmationData.getCompany());
+		if (confirmationData.getTxnRef() != null) existing.setTxnRef(confirmationData.getTxnRef());
+		if (confirmationData.getTxnEventDate() != null) existing.setTxnEventDate(confirmationData.getTxnEventDate());
+		if (confirmationData.getMaturityPaymentDate() != null) existing.setMaturityPaymentDate(confirmationData.getMaturityPaymentDate());
+		return repo.save(existing);
+	}
 
-		try {
-			int[][] result = jdbcTemplate.batchUpdate(sql, confirmations, batchsize, (ps, confirmation) -> {
-				ps.setLong(1, confirmation.getDoc_id());
-				ps.setString(2, confirmation.getCategory());
-				ps.setString(3, confirmation.getTxnRef());
-				ps.setObject(4, confirmation.getTxnEventDate());
-				ps.setObject(5, confirmation.getMaturityPaymentDate());
-				ps.setString(6, confirmation.getCompany());
-				ps.setString(7, confirmation.getEntity());
-				ps.setString(8, confirmation.getProduct());
-				ps.setString(9, confirmation.getDocumentType());
-				ps.setString(10, confirmation.getCcy());
-				ps.setString(11, confirmation.getStatus());
-				ps.setString(12, confirmation.getLastApprovedRejected());
-				ps.setObject(13, confirmation.getUploadDatetimeSgt());
-				ps.setObject(14, confirmation.getEmailDatetimeSgt());
-				ps.setString(15, confirmation.getAction());
-				ps.setString(16, confirmation.getUniqueKey());
-				ps.setString(17, confirmation.getContentMd5());
-				ps.setString(18, confirmation.getMimeType());
-				ps.setString(19, confirmation.getType());
-				ps.setString(20, confirmation.getIsRevised());
-				ps.setString(21, confirmation.getCinCif());
-				ps.setString(22, confirmation.getCompanyId());
-				ps.setString(23, confirmation.getName());
-				ps.setString(24, confirmation.getDupCheckMd5());
-				ps.setString(25, confirmation.getUserType());
-				ps.setString(26, confirmation.getMurexLabel());
-				ps.setString(27, confirmation.getLevelsOfApproval());
-				ps.setObject(28, confirmation.getTradeDate());
-				ps.setObject(29, confirmation.getUpdateTimestamp());
-			});
-			int totalInserted = 0;
-			for (int[] batch : result) {
-				totalInserted += Arrays.stream(batch).sum();
+	@Transactional
+	public TransactionConfirmations saveOrUpdate(TransactionConfirmations confirmation) {
+		if (confirmation.getId() != null && confirmation.getId() > 0) {
+			TransactionConfirmations existing = repo.findById(confirmation.getId()).orElse(null);
+			if (existing != null) {
+				return updateConfirmation(confirmation.getId(), confirmation);
 			}
-			System.out.println("Total TransactionConfirmations rows inserted: " + totalInserted);
-		} catch (Exception e) {
-			System.err.println("Batch insert failed: " + e.getMessage());
-			e.printStackTrace();
-			throw e;
 		}
+		return saveConfirmation(confirmation);
+	}
+
+	public void deleteConfirmation(Long id) {
+		repo.deleteById(id);
 	}
 }
