@@ -12,7 +12,7 @@ import com.dbs.edoc.docsearch.api.response.EdocSearchResponse;
 import com.dbs.edoc.docsearch.api.response.external.ExternalDocumentSearchRecord;
 import com.dbs.edoc.docsearch.exception.ServiceException;
 import com.dbs.edoc.docsearch.service.auth.LdapUser;
-import com.dbs.edoc.docsearch.service.auth.MarsUser;
+import com.dbsa.edoc.docsearch.service.auth.MarsUser;
 import com.dbs.edoc.docsearch.service.auth.User;
 import com.dbs.edoc.docsearch.service.auth.UserService;
 import com.dbs.edoc.docsearch.service.search.helper.DashboardChartDataAggregationHelper;
@@ -262,11 +262,17 @@ public class DocumentSearchService {
 
         LOGGER.info("Accessible entities: {}, Document classes: {}, productTypeNames: {}", accessibleEntities, documentClasses, productTypeNames);
 
-        // Prepare filter parameters using ORIGINAL values
-        String product = productTypeNames.isEmpty() ? null : productTypeNames.iterator().next();
-        String status = originalStatuses.isEmpty() ? null : originalStatuses.iterator().next(); // ← Use original
-        String entity = accessibleEntities.isEmpty() ? null : accessibleEntities.iterator().next();
-        String company = originalCompanyIds.isEmpty() ? null : originalCompanyIds.iterator().next(); // ← Use original
+        // Prepare filter parameters using ORIGINAL values.
+        // transactionConfirmationsService.searchConfirmations() only accepts a single value
+        // per filter, so a value is only safe to pass when the resolved set is unambiguously
+        // ONE entry. Picking an arbitrary entry out of a multi-value HashSet (previously via
+        // iterator().next()) silently narrowed the search to one random product/status/
+        // entity/company - if that pick had no matching rows, the whole search came back
+        // empty even though matching data existed under the other values in the set.
+        String product = singleValueOrNull(productTypeNames);
+        String status = singleValueOrNull(originalStatuses); // ← Use original
+        String entity = singleValueOrNull(accessibleEntities);
+        String company = singleValueOrNull(originalCompanyIds); // ← Use original
 
         if (DocumentSearchConstants.DistributionType.EMAIL.equalsIgnoreCase(request.getAccess())) {
             LOGGER.info("=== EMAIL SEARCH DEBUG ===");
@@ -292,7 +298,7 @@ public class DocumentSearchService {
             LOGGER.info("External user - entities user has access to : {}", entityCodes);
             accessibleEntities = entityCodes;
             // Recalculate entity filter for external users
-            entity = accessibleEntities.isEmpty() ? null : accessibleEntities.iterator().next();
+            entity = singleValueOrNull(accessibleEntities);
         }
 
         LOGGER.info("=== EDOC SEARCH DEBUG ===");
@@ -318,6 +324,13 @@ public class DocumentSearchService {
 
 
 
+
+    // transactionConfirmationsService.searchConfirmations() takes single-value filters only.
+    // Only ever pass a value when the set unambiguously resolves to exactly one - never guess
+    // by picking an arbitrary entry out of a multi-value set (see call sites in buildSearchRequest).
+    private String singleValueOrNull(Set<String> values) {
+        return values.size() == 1 ? values.iterator().next() : null;
+    }
 
     private Pageable buildConfirmationsPageable(DocumentSearchRequest request) {
         int pageSize = Math.max(request.getPageSize(), 1);
