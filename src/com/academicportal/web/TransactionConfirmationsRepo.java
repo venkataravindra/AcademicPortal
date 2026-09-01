@@ -31,31 +31,31 @@ public interface TransactionConfirmationsRepo extends JpaRepository<TransactionC
 	Page<TransactionConfirmations> findByProductAndStatus(@Param("product") String product,@Param("category") String category,
 														  @Param("status") String status, Pageable pageable);
 
-	@Query("SELECT t FROM TransactionConfirmations t WHERE " +
-			"(t.category = :category) " +
-			"OR (:product IS NULL OR t.product IN (:product)) " +
-			"OR (:documentTypes IS NULL  OR t.documentType IN (:documentTypes)) " +
-			"OR (:statuses IS NULL OR t.status IN (:statuses)) " +
-			"OR (:entityCodes IS NULL OR t.entity IN (:entityCodes)) " +
-			"OR (:companyIds IS NULL OR t.companyId IN (:companyIds)) " +
-			"OR (:txnRef IS NULL OR t.txnRef = :txnRef) " +
-			"OR (:txnEventDateFrom IS NULL OR t.txnEventDate >= :txnEventDateFrom) " +
-			"OR (:txnEventDateTo IS NULL OR t.txnEventDate <= :txnEventDateTo) " +
-			"OR (:maturityDateFrom IS NULL OR t.maturityPaymentDate >= :maturityDateFrom) " +
-			"OR (:maturityDateTo IS NULL OR t.maturityPaymentDate <= :maturityDateTo)")
-	Page<TransactionConfirmations> searchConfirmations(
-			@Param("category") String category,
-			@Param("product") Set<String> product,
-			@Param("documentTypes") Set<String> documentTypes,
-			@Param("statuses") Set<String> statuses,
-			@Param("entityCodes") Set<String> entityCodes,
-			@Param("companyIds") Set<String> companyIds,
-			@Param("txnRef") String txnRef,
-			@Param("txnEventDateFrom") LocalDate txnEventDateFrom,
-			@Param("txnEventDateTo") LocalDate txnEventDateTo,
-			@Param("maturityDateFrom") LocalDate maturityDateFrom,
-			@Param("maturityDateTo") LocalDate maturityDateTo,
-			Pageable pageable);
+@Query("SELECT t FROM TransactionConfirmations t WHERE " +
+        "(:category IS NULL OR UPPER(t.category) = UPPER(:category)) " +
+        "AND (:product IS NULL OR t.product IN (:product)) " +
+        "AND (:documentTypes IS NULL OR UPPER(REPLACE(t.documentType, ' ', '')) IN (:documentTypes)) " +
+        "AND (:statuses IS NULL OR t.status IN (:statuses)) " +
+        "AND (:entityCodes IS NULL OR t.entity IN (:entityCodes)) " +
+        "AND (:companyIds IS NULL OR t.companyId IN (:companyIds)) " +
+        "AND (:txnRef IS NULL OR t.txnRef = :txnRef) " +
+        "AND (:txnEventDateFrom IS NULL OR t.txnEventDate >= :txnEventDateFrom) " +
+        "AND (:txnEventDateTo IS NULL OR t.txnEventDate <= :txnEventDateTo) " +
+        "AND (:maturityDateFrom IS NULL OR t.maturityPaymentDate >= :maturityDateFrom) " +
+        "AND (:maturityDateTo IS NULL OR t.maturityPaymentDate <= :maturityDateTo)")
+Page<TransactionConfirmations> searchConfirmations(
+        @Param("category") String category,
+        @Param("product") Set<String> product,
+        @Param("documentTypes") Set<String> documentTypes,
+        @Param("statuses") Set<String> statuses,
+        @Param("entityCodes") Set<String> entityCodes,
+        @Param("companyIds") Set<String> companyIds,
+        @Param("txnRef") String txnRef,
+        @Param("txnEventDateFrom") LocalDate txnEventDateFrom,
+        @Param("txnEventDateTo") LocalDate txnEventDateTo,
+        @Param("maturityDateFrom") LocalDate maturityDateFrom,
+        @Param("maturityDateTo") LocalDate maturityDateTo,
+        Pageable pageable);
 
 
 
