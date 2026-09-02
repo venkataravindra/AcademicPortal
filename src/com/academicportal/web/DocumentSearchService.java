@@ -226,21 +226,20 @@ public class DocumentSearchService {
         }
 
         if (DocumentSearchConstants.DistributionType.EMAIL.equalsIgnoreCase(request.getAccess())) {
-            return Optional.of(searchTransactionConfirmations(accessibleEntities, companyIds, request));
+            return Optional.of(searchTransactionConfirmations(entityCodes, companyIds, request));
         }
         if(user instanceof MarsUser) {
             LOGGER.info("External user - entities user has access to : {}", entityCodes);
-            accessibleEntities = entityCodes;
         }
 
-        return Optional.of(searchTransactionConfirmations(accessibleEntities, companyIds, request));
+        return Optional.of(searchTransactionConfirmations(entityCodes, companyIds, request));
     }
 
     private Page<TransactionConfirmations> searchTransactionConfirmations(Set<String> entityCodes, Set<String> companyIds,
                                                                            DocumentSearchRequest request) {
         String category = request.getAccess();
         String product = request.getDocumentTypes().stream()
-                .map(DocumentType::getCategoryName)
+                .map(DocumentType::getClassName)
                 .filter(Objects::nonNull)
                 .findFirst().orElse(null);
         String status = firstOrNull(request.getStatuses());
@@ -251,6 +250,9 @@ public class DocumentSearchService {
         LocalDate txnEventDateTo = findDateAttribute(request, ATTR_TXN_EVENT_DATE).map(DateAttribute::getTo).orElse(null);
         LocalDate maturityPaymentDateFrom = findDateAttribute(request, ATTR_MATURITY_PAYMENT_DATE).map(DateAttribute::getFrom).orElse(null);
         LocalDate maturityPaymentDateTo = findDateAttribute(request, ATTR_MATURITY_PAYMENT_DATE).map(DateAttribute::getTo).orElse(null);
+
+        LOGGER.info("Resolved TransactionConfirmations search params -> category=[{}], product=[{}], status=[{}], entity=[{}], company=[{}], txnRef=[{}], txnEventDateFrom=[{}], txnEventDateTo=[{}], maturityPaymentDateFrom=[{}], maturityPaymentDateTo=[{}]",
+                category, product, status, entity, company, txnRef, txnEventDateFrom, txnEventDateTo, maturityPaymentDateFrom, maturityPaymentDateTo);
 
         return transactionConfirmationsService.searchConfirmations(category, product, status, entity, company, txnRef,
                 txnEventDateFrom, txnEventDateTo, maturityPaymentDateFrom, maturityPaymentDateTo, buildPageable(request));
