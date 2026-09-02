@@ -120,3 +120,9 @@ public interface TransactionConfirmationsRepo extends JpaRepository<TransactionC
 		}
 	}
 }
+
+SELECT id, category, document_type, status, company_id, entity
+FROM transaction_confirmations
+WHERE category = 'EDOC' AND document_type = 'CONFIRMATION'
+  AND status = 'CON' AND LOWER(company_id) LIKE LOWER('%cincif1022DBSSG%');
+
