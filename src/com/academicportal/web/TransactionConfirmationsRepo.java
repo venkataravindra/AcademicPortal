@@ -126,3 +126,8 @@ FROM transaction_confirmations
 WHERE category = 'EDOC' AND document_type = 'CONFIRMATION'
   AND status = 'CON' AND LOWER(company_id) LIKE LOWER('%cincif1022DBSSG%');
 
+SELECT status, company_id, COUNT(*) 
+FROM transaction_confirmations
+WHERE category = 'EDOC' AND document_type = 'CONFIRMATION'
+GROUP BY status, company_id;
+
