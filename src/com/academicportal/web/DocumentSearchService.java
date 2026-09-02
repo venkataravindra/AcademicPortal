@@ -226,20 +226,23 @@ public class DocumentSearchService {
         }
 
         if (DocumentSearchConstants.DistributionType.EMAIL.equalsIgnoreCase(request.getAccess())) {
-            return Optional.of(searchTransactionConfirmations(accessibleEntities, companyIds, productTypes, request));
+            return Optional.of(searchTransactionConfirmations(accessibleEntities, companyIds, request));
         }
         if(user instanceof MarsUser) {
             LOGGER.info("External user - entities user has access to : {}", entityCodes);
             accessibleEntities = entityCodes;
         }
 
-        return Optional.of(searchTransactionConfirmations(accessibleEntities, companyIds, productTypes, request));
+        return Optional.of(searchTransactionConfirmations(accessibleEntities, companyIds, request));
     }
 
     private Page<TransactionConfirmations> searchTransactionConfirmations(Set<String> entityCodes, Set<String> companyIds,
-                                                                           Set<String> productTypes, DocumentSearchRequest request) {
+                                                                           DocumentSearchRequest request) {
         String category = request.getAccess();
-        String product = firstOrNull(productTypes);
+        String product = request.getDocumentTypes().stream()
+                .map(DocumentType::getCategoryName)
+                .filter(Objects::nonNull)
+                .findFirst().orElse(null);
         String status = firstOrNull(request.getStatuses());
         String entity = firstOrNull(entityCodes);
         String company = firstOrNull(companyIds);
