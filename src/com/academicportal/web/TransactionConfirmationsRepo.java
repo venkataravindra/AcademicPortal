@@ -32,8 +32,8 @@ public interface TransactionConfirmationsRepo extends JpaRepository<TransactionC
 			@Param("status") String status, Pageable pageable);
 
 	@Query("SELECT t FROM TransactionConfirmations t WHERE t.category = :category " +
-			"AND (:product IS NULL OR t.documentType = :product) " +
-			"AND (:status IS NULL OR t.status = :status) " +
+			"AND (:product IS NULL OR REPLACE(LOWER(t.documentType), ' ', '') LIKE CONCAT('%', REPLACE(LOWER(:product), ' ', ''), '%')) " +
+            "AND (:status IS NULL OR t.status = :status) " +
 			"AND (:entity IS NULL OR t.entity = :entity) " +
 			"AND (:company IS NULL OR LOWER(t.companyId) LIKE LOWER(CONCAT('%', :company, '%'))) " +
 			"AND (:txnRef IS NULL OR LOWER(t.txnRef) LIKE LOWER(CONCAT('%', :txnRef, '%'))) " +
