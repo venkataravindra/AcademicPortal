@@ -12,12 +12,10 @@ import com.dbs.edoc.docsearch.api.response.EdocSearchResponse;
 import com.dbs.edoc.docsearch.api.response.external.ExternalDocumentSearchRecord;
 import com.dbs.edoc.docsearch.exception.ServiceException;
 import com.dbs.edoc.docsearch.service.auth.LdapUser;
-import com.dbsa.edoc.docsearch.service.auth.MarsUser;
+import com.dbs.edoc.docsearch.service.auth.MarsUser;
 import com.dbs.edoc.docsearch.service.auth.User;
 import com.dbs.edoc.docsearch.service.auth.UserService;
 import com.dbs.edoc.docsearch.service.search.helper.DashboardChartDataAggregationHelper;
-import com.dbs.edoc.docsearch.ui.model.TransactionConfirmations;
-import com.dbs.edoc.docsearch.ui.service.TransactionConfirmationsService;
 import com.dbs.edoc.docsearch.utils.DocumentSearchConstants;
 import com.google.gson.Gson;
 import org.apache.commons.lang3.StringUtils;
@@ -35,17 +33,11 @@ import org.elasticsearch.search.sort.SortOrder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
-import org.springframework.data.repository.query.Param;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
@@ -64,7 +56,6 @@ public class DocumentSearchService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DocumentSearchService.class);
     private static final String FIELD_CREATE_TIMESTAMP = "createTimestamp";
-    private static final String FIELD_UPLOAD_DATETIME_SGT = "uploadDatetimeSgt";
     private static final String ENTITY_CODE = "entityCode";
     private static final String STATUS = "status";
     private static final String MX_BOOKING_ENTITY = "mxBookingEntity";
@@ -77,18 +68,15 @@ public class DocumentSearchService {
     private SearchConfigService configService;
     private UserService userService;
     private ExcelBuilder excelBuilder;
-    private TransactionConfirmationsService transactionConfirmationsService;
     private Gson gson;
 
     @Autowired
     public DocumentSearchService(SearchConfigService configService,
                                  UserService userService,
-                                 ExcelBuilder excelBuilder,
-                                 TransactionConfirmationsService transactionConfirmationsService) {
+                                 ExcelBuilder excelBuilder) {
         this.configService = configService;
         this.userService = userService;
         this.excelBuilder = excelBuilder;
-        this.transactionConfirmationsService = transactionConfirmationsService;
         this.gson = new Gson();
 
         this.entityMappingRef = new AtomicReference<>(populateEntityMappingMap());
@@ -97,14 +85,28 @@ public class DocumentSearchService {
     }
 
     public DocumentLastUploadResponse getLastUploadTime(DocumentSearchRequest request) {
-        request.setOffset(0);
-        request.setPageSize(1);
-        request.setSortField(FIELD_UPLOAD_DATETIME_SGT);
-        request.setSortAscending(false);
+        String lastUploadStr = buildSearchRequest(request).map(searchRequest -> {
+            searchRequest.source().from(0).size(1)
+                    .sort(fieldSort(FIELD_CREATE_TIMESTAMP).order(SortOrder.DESC))
+                    .fetchSource(FIELD_CREATE_TIMESTAMP, null);
 
-        String lastUploadStr = buildSearchRequest(request).map(page ->
-                page.hasContent() ? Objects.toString(page.getContent().get(0).getUploadDatetimeSgt(), null) : null
-        ).orElse(null);
+            if (DocumentSearchConstants.DistributionType.EMAIL.equalsIgnoreCase(request.getAccess())) {
+                Set<String> docClasses = new HashSet<>();
+                for (DocumentType documentType : request.getDocumentTypes()) {
+                    docClasses.add(upperCase(documentType.getClassName()));
+                }
+                Set<String> indices = configService.getIndexForDocType(docClasses);
+                searchRequest.indices(indices.toArray(new String[indices.size()]));
+            }
+
+            SearchResponse searchResponse = configService.search(searchRequest);
+            SearchHits hits = searchResponse.getHits();
+            if (hits.getHits().length == 1) {
+                return Objects.toString(hits.getAt(0).getSourceAsMap().get(FIELD_CREATE_TIMESTAMP), null);
+            }
+
+            return null;
+        }).orElse(null);
 
         DocumentLastUploadResponse response = new DocumentLastUploadResponse();
         response.setData(lastUploadStr);
@@ -118,10 +120,9 @@ public class DocumentSearchService {
     }
 
     public ResponseEntity<byte[]> export(DocumentSearchRequest request) {
-        request.setOffset(0);
-        request.setPageSize(65000);
-        return buildSearchRequest(request).map(page -> {
-            EdocSearchResponse<Map<String, Object>> searchResponse = buildSearchResponse(page);
+        return buildSearchRequest(request).map(searchRequest -> {
+            searchRequest.source().from(0).size(65000);
+            EdocSearchResponse<Map<String, Object>> searchResponse = buildSearchResponse(searchRequest);
             String filename = String.format("SearchResult_%s.%s", now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")), "xls");
             HttpHeaders responseHeaders = new HttpHeaders();
             responseHeaders.set(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_OCTET_STREAM_VALUE);
@@ -193,44 +194,11 @@ public class DocumentSearchService {
     }
 
 
-    private Optional<Page<TransactionConfirmations>> buildSearchRequest(DocumentSearchRequest request) {
-        LOGGER.info("=== IMMEDIATE REQUEST OBJECT DEBUG ===");
-        LOGGER.info("Request toString: {}", request);
-        LOGGER.info("request.getCompanyIds() direct call: {}", request.getCompanyIds());
-        LOGGER.info("request.getStatuses() direct call: {}", request.getStatuses());
-        LOGGER.info("request.getEntityCodes() direct call: {}", request.getEntityCodes());
-        LOGGER.info("request.getAccess() direct call: {}", request.getAccess());
-
-        // Check if they're null vs empty
-        LOGGER.info("CompanyIds == null? {}", request.getCompanyIds() == null);
-        LOGGER.info("Statuses == null? {}", request.getStatuses() == null);
-        LOGGER.info("CompanyIds.isEmpty()? {}", request.getCompanyIds().isEmpty());
-        LOGGER.info("Statuses.isEmpty()? {}", request.getStatuses().isEmpty());
-
-
+    private Optional<SearchRequest> buildSearchRequest(DocumentSearchRequest request) {
         Set<DocumentType> documentTypes = request.getDocumentTypes();
-        Set<String> productTypeNames = documentTypes.stream()
-                .flatMap(documentType -> documentType.getProductTypeNames().stream())
-                .collect(Collectors.toSet());
         if (request.getDocumentTypes().isEmpty()) {
             throw new IllegalArgumentException("Requires at least 1 document type");
         }
-
-        // Validate that the first parameter (access/category) is provided
-        if (StringUtils.isBlank(request.getAccess())) {
-            LOGGER.warn("Search request rejected: Access/Category parameter is required");
-            throw new IllegalArgumentException("Access/Category parameter is required for search");
-        }
-
-        // PRESERVE ORIGINAL REQUEST VALUES IMMEDIATELY
-        Set<String> originalEntityCodes = new HashSet<>(request.getEntityCodes());
-        Set<String> originalCompanyIds = new HashSet<>(request.getCompanyIds());
-        Set<String> originalStatuses = new HashSet<>(request.getStatuses());
-
-        LOGGER.info("=== PRESERVED ORIGINAL VALUES ===");
-        LOGGER.info("Preserved EntityCodes: {}", originalEntityCodes);
-        LOGGER.info("Preserved CompanyIds: {}", originalCompanyIds);
-        LOGGER.info("Preserved Statuses: {}", originalStatuses);
 
         Set<String> entityCodes = request.getEntityCodes();
         Set<String> companyIds = request.getCompanyIds();
@@ -241,14 +209,12 @@ public class DocumentSearchService {
         // check permission
         User user = userService.currentUser();
         LOGGER.info("Performing search under user id: {}", user.getUserId());
-        LOGGER.info("Primary search parameter - Category/Access: '{}'", request.getAccess());
-
         if (user instanceof LdapUser) {
             LdapUser ldapUser = (LdapUser) user;
 
             Map<String, Set<String>> entityDocumentMap = populateAccessLevels(ldapUser);
             LOGGER.info("Document and entities user has access to : {}", entityDocumentMap);
-            addEntityDocumentProducts(entityDocumentMap, documentTypes, entityCodes, documentClasses, productTypes, accessibleEntities, user);
+            addEntityDocumentProducts(entityDocumentMap, documentTypes,entityCodes,documentClasses,productTypes, accessibleEntities, user);
             LOGGER.info("Searching data under doc classes and entity codes [{}] for User {} and accessible entities {} ",
                     entityDocumentMap, ldapUser.getUserId(), accessibleEntities);
         } else {
@@ -256,155 +222,22 @@ public class DocumentSearchService {
                 return Optional.empty();
         }
 
-        Pageable pageable = buildConfirmationsPageable(request);
-        LOGGER.info("Search parameters - documentTypes: {}, entityCodes: {}, companyIds: {}, statuses: {}",
-                documentTypes, entityCodes, originalCompanyIds, originalStatuses); // ← Use original values
-
-        LOGGER.info("Accessible entities: {}, Document classes: {}, productTypeNames: {}", accessibleEntities, documentClasses, productTypeNames);
-
-        // Prepare filter parameters using ORIGINAL values.
-        // transactionConfirmationsService.searchConfirmations() only accepts a single value
-        // per filter, so a value is only safe to pass when the resolved set is unambiguously
-        // ONE entry. Picking an arbitrary entry out of a multi-value HashSet (previously via
-        // iterator().next()) silently narrowed the search to one random product/status/
-        // entity/company - if that pick had no matching rows, the whole search came back
-        // empty even though matching data existed under the other values in the set.
-        String product = singleValueOrNull(productTypeNames);
-        String status = singleValueOrNull(originalStatuses); // ← Use original
-        String entity = singleValueOrNull(accessibleEntities);
-        String company = singleValueOrNull(originalCompanyIds); // ← Use original
-
         if (DocumentSearchConstants.DistributionType.EMAIL.equalsIgnoreCase(request.getAccess())) {
-            LOGGER.info("=== EMAIL SEARCH DEBUG ===");
-            LOGGER.info("Required Parameter - Category: '{}'", request.getAccess());
-            LOGGER.info("Optional Filter - ProductTypeNames: {}", productTypeNames);
-            LOGGER.info("Optional Filter - AccessibleEntities: {}", accessibleEntities);
-            LOGGER.info("Optional Filter - CompanyIds: {}", originalCompanyIds);
-            LOGGER.info("Optional Filter - Statuses: {}", originalStatuses);
-
-            LOGGER.info("Final EMAIL search parameters - category: '{}' (REQUIRED), product: '{}', status: '{}', entity: '{}', company: '{}'",
-                    request.getAccess(), product, status, entity, company);
-
-            return Optional.of(transactionConfirmationsService.searchConfirmations(
-                    request.getAccess(),
-                    product,
-                    status,
-                    entity,
-                    company,
-                    null, null, null, null, null, pageable));
+            Set<String> nonEdcoDocumentClasses = configService.getNonEdocDocClassesForDocType(documentClasses);
+            SearchSourceBuilder builder = buildNonEdocQuery(nonEdcoDocumentClasses, accessibleEntities, companyIds, productTypes, request);
+            Set<String> indices = configService.getIndexForDocType(documentClasses);
+            // instead of this return we need to use transactionConfirmationsService.searchConfirmations 
+            return Optional.of(configService.createSearchRequest(builder).indices(indices.toArray(new String[indices.size()])));
+    
         }
-
         if(user instanceof MarsUser) {
             LOGGER.info("External user - entities user has access to : {}", entityCodes);
             accessibleEntities = entityCodes;
-            // Recalculate entity filter for external users
-            entity = singleValueOrNull(accessibleEntities);
         }
 
-        LOGGER.info("=== EDOC SEARCH DEBUG ===");
-        LOGGER.info("Required Parameter - Category: '{}'", request.getAccess());
-        LOGGER.info("Optional Filter - ProductTypeNames: {}", productTypeNames);
-        LOGGER.info("Optional Filter - AccessibleEntities: {}", accessibleEntities);
-        LOGGER.info("Optional Filter - CompanyIds: {}", originalCompanyIds);     // ← FIXED: Use original
-        LOGGER.info("Optional Filter - Statuses: {}", originalStatuses);         // ← FIXED: Use original
-        LOGGER.info("##Accessible entities##: {}, Document classes: {}, productTypeNames: {}", accessibleEntities, documentClasses, productTypeNames);
-
-        LOGGER.info("Final EDOC search parameters - category: '{}' (REQUIRED), product: '{}', status: '{}', entity: '{}', company: '{}'",
-                request.getAccess(), product, status, entity, company);
-
-        return Optional.of(transactionConfirmationsService.searchConfirmations(
-                request.getAccess(),
-                product,
-                status,
-                entity,
-                company,
-                null, null, null, null, null, pageable));
-    }
-
-
-
-
-
-    // transactionConfirmationsService.searchConfirmations() takes single-value filters only.
-    // Only ever pass a value when the set unambiguously resolves to exactly one - never guess
-    // by picking an arbitrary entry out of a multi-value set (see call sites in buildSearchRequest).
-    private String singleValueOrNull(Set<String> values) {
-        return values.size() == 1 ? values.iterator().next() : null;
-    }
-
-    private Pageable buildConfirmationsPageable(DocumentSearchRequest request) {
-        int pageSize = Math.max(request.getPageSize(), 1);
-        int pageNumber = request.getOffset() / pageSize;
-        // sortField historically named an Elasticsearch document attribute; map the
-        // known ES-only field to its TransactionConfirmations JPA equivalent.
-        String sortField = FIELD_CREATE_TIMESTAMP.equals(request.getSortField())
-                ? FIELD_UPLOAD_DATETIME_SGT
-                : request.getSortField();
-        Sort sort = StringUtils.isNotEmpty(sortField)
-                ? Sort.by(request.isSortAscending() ? Sort.Direction.ASC : Sort.Direction.DESC, sortField)
-                : Sort.unsorted();
-        return PageRequest.of(pageNumber, pageSize, sort);
-    }
-
-    private EdocSearchResponse<Map<String, Object>> buildSearchResponse(Page<TransactionConfirmations> page) {
-        EdocSearchResponse<Map<String, Object>> response = new EdocSearchResponse<>();
-        response.setTotal(page.getTotalElements());
-        response.setResults(page.getContent().stream().map(this::confirmationToMap).collect(Collectors.toList()));
-        return response;
-    }
-
-    private Map<String, Object> confirmationToMap(TransactionConfirmations confirmation) {
-        Map<String, Object> map = new HashMap<>();
-
-        // Existing SIT fields
-        map.put("id", confirmation.getId());
-        map.put("docId", confirmation.getDoc_id());
-        map.put("category", confirmation.getCategory());
-        map.put("txnRef", confirmation.getTxnRef());
-        map.put("txnEventDate", confirmation.getTxnEventDate());
-        map.put("maturityPaymentDate", confirmation.getMaturityPaymentDate());
-        map.put("company", confirmation.getCompany());
-        map.put("entity", confirmation.getEntity());
-        map.put("product", confirmation.getProduct());
-        map.put("documentType", confirmation.getDocumentType());
-        map.put("ccy", confirmation.getCcy());
-        map.put("status", confirmation.getStatus());
-        map.put("lastApprovedRejected", confirmation.getLastApprovedRejected());
-        map.put("uploadDatetimeSgt", confirmation.getUploadDatetimeSgt());
-        map.put("emailDatetimeSgt", confirmation.getEmailDatetimeSgt());
-        map.put("action", confirmation.getAction());
-        map.put("uniqueKey", confirmation.getUniqueKey());
-        map.put("contentMd5", confirmation.getContentMd5());
-        map.put("mimeType", confirmation.getMimeType());
-        map.put("type", confirmation.getType());
-        map.put("isRevised", confirmation.getIsRevised());
-        map.put("cinCif", confirmation.getCinCif());
-        map.put("companyId", confirmation.getCompanyId());
-        map.put("name", confirmation.getName());
-        map.put("dupCheckMd5", confirmation.getDupCheckMd5());
-        map.put("userType", confirmation.getUserType());
-        map.put("murexLabel", confirmation.getMurexLabel());
-        map.put("levelsOfApproval", confirmation.getLevelsOfApproval());
-        map.put("tradeDate", confirmation.getTradeDate());
-        map.put("updateTimestamp", confirmation.getUpdateTimestamp());
-        try {
-            map.put("tradeReference", confirmation.getTxnRef());
-            map.put("companyName", confirmation.getCompany());
-            map.put("maturityOrPaymentDate", confirmation.getMaturityPaymentDate());
-            map.put("createTimestamp", confirmation.getUploadDatetimeSgt());
-            map.put("maturityDate", confirmation.getMaturityPaymentDate());
-            map.put("productTypeName", confirmation.getProduct());
-            map.put("entityCode", confirmation.getEntity());
-            map.put("tradeOrEventDate", confirmation.getTxnEventDate() != null ? confirmation.getTxnEventDate() : confirmation.getTradeDate());
-            map.put("cinOrCif", confirmation.getCinCif());
-            map.put("createOrUpdateTimestamp", confirmation.getUpdateTimestamp());
-            map.put("productCode", confirmation.getProduct());
-            map.put("ackStatus", confirmation.getStatus());
-        } catch(Exception e){
-            e.getMessage();
-        }
-
-        return map;
+        SearchSourceBuilder builder = buildEdocQuery(documentClasses, accessibleEntities, companyIds, productTypes, request, user);
+         // instead of this return we need to use transactionConfirmationsService.searchConfirmations 
+        return Optional.of(configService.createSearchRequest(builder));
     }
 
     private void addEntityDocumentProducts(Map<String, Set<String>> entityDocumentMap, Set<DocumentType> documentTypes,
@@ -412,44 +245,22 @@ public class DocumentSearchService {
                                            Set<String> accessibleEntities, User user) {
         LdapUser ldapUser = (LdapUser) user;
         for (DocumentType documentType : documentTypes) {
-            String documentClassName = documentType.getClassName();
-
-            // Add mapping for TRANSACTIONCONFIRMATION to CONFIRMATION
-            String mappedDocumentClass = documentClassName;
-            if ("TRANSACTIONCONFIRMATION".equalsIgnoreCase(documentClassName)) {
-                mappedDocumentClass = "CONFIRMATION";
-            }
-
-            LOGGER.info("User {} searching for document type: {}, mapped to permission type: {}",
-                    ldapUser.getUserId(), documentClassName, mappedDocumentClass);
-
-            if(entityDocumentMap.containsKey(mappedDocumentClass.toUpperCase())) {
-                documentClasses.add(upperCase(documentClassName)); // Use original class name
+            if(entityDocumentMap.containsKey(documentType.getClassName())) {
+                documentClasses.add(upperCase(documentType.getClassName()));
                 productTypes.addAll(documentType.getProductTypeNames().stream().map(StringUtils::upperCase).collect(Collectors.toSet()));
                 LOGGER.info("User {} Requested to search on these entities: {}", ldapUser.getUserId(), entityCodes);
-
                 if(!entityCodes.isEmpty()) {
-                    // Filter requested entities against user's accessible entities for this document type
-                    Set<String> userAccessibleEntities = entityDocumentMap.get(mappedDocumentClass.toUpperCase());
-                    Set<String> filteredEntities = entityCodes.stream()
-                            .filter(entity -> userAccessibleEntities.contains(entity))
-                            .collect(Collectors.toSet());
-                    accessibleEntities.addAll(filteredEntities);
-                    LOGGER.info("User {} can search on these filtered entities: {}", ldapUser.getUserId(), filteredEntities);
+                    accessibleEntities.addAll(entityCodes.stream().filter(entity -> entityDocumentMap.get(documentType.getClassName()).contains(entity)).collect(Collectors.toSet()));
+                    LOGGER.info("User {} can search on these filtered entities: {}", ldapUser.getUserId(), accessibleEntities);
                 } else {
-                    // If no specific entities requested, add all accessible entities for this document type
-                    accessibleEntities.addAll(entityDocumentMap.get(mappedDocumentClass.toUpperCase()));
+                    accessibleEntities.addAll(entityDocumentMap.get(documentType.getClassName()));
                     LOGGER.info("User {} can only search on these accessibleEntities entities: {} for doctype : {}",
-                            ldapUser.getUserId(), accessibleEntities, mappedDocumentClass);
+                            ldapUser.getUserId(), accessibleEntities, documentType.getClassName());
                 }
-            } else {
-                LOGGER.warn("User {} does not have access to document type: {} (mapped: {})",
-                        ldapUser.getUserId(), documentClassName, mappedDocumentClass);
             }
         }
         LOGGER.info("User {} final accessible entities: {}", ldapUser.getUserId(), accessibleEntities);
     }
-
 
     private static Map<String, Set<String>> populateAccessLevels(LdapUser ldapUser) {
         Map<String, Set<String>> documentPermissions = new HashMap<>();
